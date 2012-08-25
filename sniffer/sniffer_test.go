@@ -76,14 +76,14 @@ func TestSniffer(t *testing.T) {
 	expectedServer := `Foo!Bar!`
 	expectedClient := "Received Foo!\nReceived Bar!\n"
 	expectedSniffer :=
-		`>>>>>>
+		`>>>>>> 0
 Foo!
-<<<<<<
+<<<<<< 0
 Received Foo!
 
->>>>>>
+>>>>>> 0
 Bar!
-<<<<<<
+<<<<<< 0
 Received Bar!
 
 `
@@ -130,14 +130,14 @@ func TestHtml(t *testing.T) {
 		t.Errorf("Result body was %s, error %v", result, err)
 	}
 	snifferExpected :=
-		`>>>>>>
+		`>>>>>> 0
 GET / HTTP/1.1
 Host: 127.0.0.1:5678
 User-Agent: Go http package
 Accept-Encoding: gzip
 
 
-<<<<<<
+<<<<<< 0
 HTTP/1.1 200 OK
 Content-Type: text/plain;charset=UTF-8
 Date: ` + time.Now().UTC().Format(http.TimeFormat) + `

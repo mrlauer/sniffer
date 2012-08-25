@@ -15,6 +15,7 @@ A simple example:
 package sniffer
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -30,10 +31,12 @@ type Sniffer struct {
 
 	closed bool
 	lock   sync.Mutex
+
+	Id int
 }
 
-// run sets up the read/write loops
-func (s *Sniffer) run() {
+// Run sets up the read/write loops. It does not block.
+func (s *Sniffer) Run() {
 	bufSz := 4096
 	// client -> server
 	process := func(from io.ReadCloser, to io.WriteCloser, preface string) {
@@ -42,7 +45,7 @@ func (s *Sniffer) run() {
 			n, errR := from.Read(buffer)
 			var errW error
 			if n > 0 {
-				io.WriteString(s.output, preface)
+				io.WriteString(s.output, s.preface(preface))
 				s.output.Write(buffer[:n])
 				io.WriteString(s.output, "\n")
 				_, errW = to.Write(buffer[:n])
@@ -62,8 +65,12 @@ func (s *Sniffer) run() {
 			}
 		}
 	}
-	go process(s.client, s.server, ">>>>>>\n")
-	go process(s.server, s.client, "<<<<<<\n")
+	go process(s.client, s.server, ">>>>>>")
+	go process(s.server, s.client, "<<<<<<")
+}
+
+func (s *Sniffer) preface(p string) string {
+	return fmt.Sprintf("%s %v\n", p, s.Id)
 }
 
 // setClosed sets the close flag and returns the previous status.
@@ -78,16 +85,17 @@ func (s *Sniffer) setClosed(conn io.Closer) bool {
 	return old
 }
 
-// NewSniffer returns a new sniffer using the two connections
+// NewSniffer returns a new sniffer using the two connections.
+// It does not start the sniffer.
 func NewSniffer(client, server net.Conn, output io.Writer) *Sniffer {
 	s := &Sniffer{client: client, server: server, output: output}
-	s.run()
 	return s
 }
 
 // Sniff listens on the listener, dials the server when it gets a connection,
 // and sniffs the resulting traffic.
 func Sniff(listener net.Listener, serverAddr string, output io.Writer) {
+	var id int
 	for {
 		clientConn, err := listener.Accept()
 		if err != nil {
@@ -98,6 +106,9 @@ func Sniff(listener net.Listener, serverAddr string, output io.Writer) {
 			log.Printf("Error in Dial: %v\n", err)
 			return
 		}
-		NewSniffer(clientConn, serverConn, output)
+		s := NewSniffer(clientConn, serverConn, output)
+		s.Id = id
+		id++
+		s.Run()
 	}
 }
