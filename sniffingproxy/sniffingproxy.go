@@ -18,8 +18,8 @@ func main() {
 	// Redirect logging output.
 	log.SetOutput(os.Stderr)
 
-	pport := flag.String("port", "", "Port to listen on")
-	pserver := flag.String("server", "", "Server to dial")
+	pport := flag.String("local", "", "Address to listen on")
+	pserver := flag.String("remote", "", "Remote server to dial")
 	ptestserver := flag.Bool("testserver", false, "Run as a simple http server, for testing purposes")
 
 	flag.Parse()
