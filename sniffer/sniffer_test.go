@@ -65,16 +65,16 @@ func TestSniffer(t *testing.T) {
 		io.Copy(clientOutput, conn)
 	}()
 	delay := time.Microsecond * 1000
-	io.WriteString(conn, "Foo!")
+	io.WriteString(conn, "Foo!\n")
 	time.Sleep(delay)
-	io.WriteString(conn, "Bar!")
+	io.WriteString(conn, "Bar!\n")
 	time.Sleep(delay)
 	conn.Close()
 	<-serverDone
 	listener.Close()
 
-	expectedServer := `Foo!Bar!`
-	expectedClient := "Received Foo!\nReceived Bar!\n"
+	expectedServer := `Foo!\nBar!\n`
+	expectedClient := "Received Foo!\n\nReceived Bar!\n\n"
 	expectedSniffer :=
 		`>>>>>> 0
 Foo!
@@ -136,7 +136,6 @@ Host: 127.0.0.1:5678
 User-Agent: Go http package
 Accept-Encoding: gzip
 
-
 <<<<<< 0
 HTTP/1.1 200 OK
 Content-Type: text/plain;charset=UTF-8
@@ -146,7 +145,6 @@ Transfer-Encoding: chunked
 5
 Ohai!
 0
-
 
 `
 	snifferGot := strings.Replace(string(snifferOutput.Bytes()), "\r", "", -1)

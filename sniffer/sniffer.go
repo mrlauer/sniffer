@@ -25,9 +25,10 @@ import (
 // Sniffer passes data between a client and server (it doesn't really care which is which)
 // and outputs data to its output writer.
 type Sniffer struct {
-	client net.Conn
-	server net.Conn
-	output io.Writer
+	client     net.Conn
+	server     net.Conn
+	fromClient io.Writer
+	fromServer io.Writer
 
 	closed bool
 	lock   sync.Mutex
@@ -39,15 +40,13 @@ type Sniffer struct {
 func (s *Sniffer) Run() {
 	bufSz := 4096
 	// client -> server
-	process := func(from io.ReadCloser, to io.WriteCloser, preface string) {
+	process := func(from io.ReadCloser, to io.WriteCloser, output *io.Writer) {
 		buffer := make([]byte, bufSz)
 		for {
 			n, errR := from.Read(buffer)
 			var errW error
 			if n > 0 {
-				io.WriteString(s.output, s.preface(preface))
-				s.output.Write(buffer[:n])
-				io.WriteString(s.output, "\n")
+				(*output).Write(buffer[:n])
 				_, errW = to.Write(buffer[:n])
 			}
 			// Distinguish between EOF and other errors?
@@ -65,12 +64,8 @@ func (s *Sniffer) Run() {
 			}
 		}
 	}
-	go process(s.client, s.server, ">>>>>>")
-	go process(s.server, s.client, "<<<<<<")
-}
-
-func (s *Sniffer) preface(p string) string {
-	return fmt.Sprintf("%s %v\n", p, s.Id)
+	go process(s.client, s.server, &s.fromClient)
+	go process(s.server, s.client, &s.fromServer)
 }
 
 // setClosed sets the close flag and returns the previous status.
@@ -87,9 +82,25 @@ func (s *Sniffer) setClosed(conn io.Closer) bool {
 
 // NewSniffer returns a new sniffer using the two connections.
 // It does not start the sniffer.
-func NewSniffer(client, server net.Conn, output io.Writer) *Sniffer {
-	s := &Sniffer{client: client, server: server, output: output}
+func NewSniffer(client, server net.Conn, id int, rawOutput io.Writer) *Sniffer {
+	s := &Sniffer{client: client, server: server, Id: id}
+	s.fromClient = &outputWrapper{rawOutput, fmt.Sprintf(">>>>>> %d\n", id)}
+	s.fromServer = &outputWrapper{rawOutput, fmt.Sprintf("<<<<<< %d\n", id)}
 	return s
+}
+
+// outputWrapper writes a preface before whatever it's writing.
+type outputWrapper struct {
+	w       io.Writer
+	preface string
+}
+
+func (w *outputWrapper) Write(data []byte) (int, error) {
+	_, err := io.WriteString(w.w, w.preface)
+	if err != nil {
+		return 0, err
+	}
+	return w.w.Write(data)
 }
 
 // Sniff listens on the listener, dials the server when it gets a connection,
@@ -106,8 +117,7 @@ func Sniff(listener net.Listener, serverAddr string, output io.Writer) {
 			log.Printf("Error in Dial: %v\n", err)
 			return
 		}
-		s := NewSniffer(clientConn, serverConn, output)
-		s.Id = id
+		s := NewSniffer(clientConn, serverConn, id, output)
 		id++
 		s.Run()
 	}
