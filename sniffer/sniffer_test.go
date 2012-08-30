@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -99,32 +100,55 @@ Received Bar!
 
 }
 
-func TestHtml(t *testing.T) {
+func doTestHtml(t *testing.T, trans WriteFramerTransformer, snifferExpected func() string) {
 	http.DefaultServeMux = http.NewServeMux()
 	serverAddr := "127.0.0.1:1234"
 	snifferAddr := "127.0.0.1:5678"
+
+	// Make sure we wait until everything is done
+	var wg sync.WaitGroup
+	wg.Add(2)
+	defer wg.Wait()
 	kill := make(chan bool)
 	defer close(kill)
+
+	// Don't keep idle connections
+	defer http.DefaultTransport.(*http.Transport).CloseIdleConnections()
+
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-type", "text/plain;charset=UTF-8")
 		io.WriteString(w, "Ohai!")
 	})
 	go func() {
-		l, _ := net.Listen("tcp", serverAddr)
+		l, err := net.Listen("tcp", serverAddr)
+		if err != nil {
+			log.Fatal(err)
+			t.Errorf("Error in net.Listen: %v\n", err)
+		}
 		go http.Serve(l, nil)
 		<-kill
 		l.Close()
+		wg.Done()
 	}()
 
 	snifferOutput := bytes.NewBuffer(nil)
 	go func() {
 		l, err := net.Listen("tcp", snifferAddr)
 		if err != nil {
-			log.Fatalf("Error in listen for sniffer: %v", err)
+			log.Fatal(err)
+			t.Errorf("Error in listen for sniffer: %v", err)
 		}
-		go Sniff(l, serverAddr, snifferOutput)
+		fromClient, fromServer := DefaultWriteFramers(snifferOutput)
+		if trans != nil {
+			fromClient = trans.Transform(fromClient)
+			fromServer = trans.Transform(fromServer)
+		}
+		go func() {
+			SniffToOutput(l, serverAddr, fromClient, fromServer)
+		}()
 		<-kill
 		l.Close()
+		wg.Done()
 	}()
 
 	r, err := http.Get("http://" + snifferAddr)
@@ -135,8 +159,16 @@ func TestHtml(t *testing.T) {
 	if string(result) != "Ohai!" || err != nil {
 		t.Errorf("Result body was %s, error %v", result, err)
 	}
-	snifferExpected :=
-		`>>>>>> 0
+	snifferGot := strings.Replace(string(snifferOutput.Bytes()), "\r", "", -1)
+	exp := snifferExpected()
+	if snifferGot != exp {
+		t.Errorf("Sniffer got \n%q\n, not\n%q\nat %v", snifferGot, exp, time.Now())
+	}
+}
+
+func TestHtml(t *testing.T) {
+	snifferExpected := func() string {
+		return `>>>>>> 0
 GET / HTTP/1.1
 Host: 127.0.0.1:5678
 User-Agent: Go http package
@@ -153,9 +185,72 @@ Ohai!
 0
 
 `
-	snifferGot := strings.Replace(string(snifferOutput.Bytes()), "\r", "", -1)
-	if snifferGot != snifferExpected {
-		t.Errorf("Sniffer got %q\n", snifferGot)
 	}
-	time.Sleep(time.Millisecond * 10)
+	doTestHtml(t, nil, snifferExpected)
+}
+
+func TestHtmlSuppressHeaders(t *testing.T) {
+	snifferExpected := func() string {
+		return `>>>>>> 0
+GET / HTTP/1.1
+<<<<<< 0
+HTTP/1.1 200 OK
+5
+Ohai!
+0
+
+`
+	}
+	doTestHtml(t, WriteFramerTransformer(SuppressHtmlHeaders), snifferExpected)
+}
+
+func TestHtmlHeaderSuppresserFunc(t *testing.T) {
+	buf := bytes.NewBuffer(nil)
+	w := RawOutputFramer{buf}
+
+	msg1 := `GET / HTTP/1.1
+Host: 127.0.0.1:5678
+User-Agent: Go http package
+Accept-Encoding: gzip
+
+5
+Ohai!
+0
+
+
+`
+	msg2 := `HTTP/1.1 200 OK
+Content-Type: text/plain;charset=UTF-8
+Date: ` + time.Now().UTC().Format(http.TimeFormat) + `
+Transfer-Encoding: chunked
+
+5
+hello
+0
+
+
+`
+	expected := `GET / HTTP/1.1
+5
+Ohai!
+0
+
+
+HTTP/1.1 200 OK
+5
+hello
+0
+
+
+`
+
+	msg1 = strings.Replace(msg1, "\n", "\r\n", -1)
+	msg2 = strings.Replace(msg2, "\n", "\r\n", -1)
+
+	SuppressHtmlHeaders(w, nil, []byte(msg1))
+	SuppressHtmlHeaders(w, nil, []byte(msg2))
+	s := strings.Replace(string(buf.Bytes()), "\r\n", "\n", -1)
+	if s != expected {
+		t.Errorf("Got %s\n", s)
+	}
 }

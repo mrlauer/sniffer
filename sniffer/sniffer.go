@@ -21,7 +21,12 @@ import (
 	"log"
 	"net"
 	"sync"
+	"unicode"
 )
+
+func join(data ...[]byte) []byte {
+	return bytes.Join(data, nil)
+}
 
 // Sniffer passes data between a client and server (it doesn't really care which is which)
 // and outputs data to its output writer.
@@ -41,14 +46,14 @@ type Sniffer struct {
 func (s *Sniffer) Run() {
 	bufSz := 4096
 	// client -> server
-	process := func(from io.ReadCloser, to io.WriteCloser, output *WriteFramer) {
+	process := func(from io.ReadCloser, to io.WriteCloser, output WriteFramer) {
 		buffer := make([]byte, bufSz)
 		for {
 			n, errR := from.Read(buffer)
 			var errW error
 			if n > 0 {
 				s.lock.Lock()
-				(*output).WriteFrame(buffer[:n])
+				output.WriteFrame(s, buffer[:n])
 				s.lock.Unlock()
 				_, errW = to.Write(buffer[:n])
 			}
@@ -67,8 +72,8 @@ func (s *Sniffer) Run() {
 			}
 		}
 	}
-	go process(s.client, s.server, &s.fromClient)
-	go process(s.server, s.client, &s.fromServer)
+	go process(s.client, s.server, s.fromClient)
+	go process(s.server, s.client, s.fromServer)
 }
 
 // setClosed sets the close flag and returns the previous status.
@@ -90,21 +95,27 @@ func NewSniffer(client, server net.Conn, id int, fromClient, fromServer WriteFra
 	return s
 }
 
-func NewSnifferDefault(client, server net.Conn, id int, rawOutput io.Writer) *Sniffer {
-	fromClient := PrefaceWriter(fmt.Sprintf(">>>>>> %d\n", id)).Transform(RawOutputFramer{rawOutput})
-	fromServer := PrefaceWriter(fmt.Sprintf("<<<<<< %d\n", id)).Transform(RawOutputFramer{rawOutput})
-	return NewSniffer(client, server, id, fromClient, fromServer)
+func makePrefacer(format string) WriteFramerTransformer {
+	return PrefaceWriter(func(s *Sniffer) []byte {
+		return []byte(fmt.Sprintf(format, s.Id))
+	})
+}
+
+func DefaultWriteFramers(rawOutput io.Writer) (fromClient, fromServer WriteFramer) {
+	fromClient = makePrefacer(">>>>>> %d\n").Transform(RawOutputFramer{rawOutput})
+	fromServer = makePrefacer("<<<<<< %d\n").Transform(RawOutputFramer{rawOutput})
+	return
 }
 
 type WriteFramer interface {
-	WriteFrame(data ...[]byte) error
+	WriteFrame(s *Sniffer, data ...[]byte) error
 }
 
 type RawOutputFramer struct {
 	io.Writer
 }
 
-func (r RawOutputFramer) WriteFrame(data ...[]byte) error {
+func (r RawOutputFramer) WriteFrame(s *Sniffer, data ...[]byte) error {
 	for _, d := range data {
 		_, err := io.Writer(r).Write(d)
 		if err != nil {
@@ -114,69 +125,71 @@ func (r RawOutputFramer) WriteFrame(data ...[]byte) error {
 	return nil
 }
 
-type WriteFramerFunc func(data ...[]byte) error
+type WriteFramerFunc func(s *Sniffer, data ...[]byte) error
 
-func (f WriteFramerFunc) WriteFrame(data ...[]byte) error {
-	return f(data...)
+func (f WriteFramerFunc) WriteFrame(s *Sniffer, data ...[]byte) error {
+	return f(s, data...)
 }
 
-type WriteFramerTransformer func(w WriteFramer, data ...[]byte) error
+type WriteFramerTransformer func(w WriteFramer, s *Sniffer, data ...[]byte) error
 
 func (f WriteFramerTransformer) Transform(w WriteFramer) WriteFramer {
-	return WriteFramerFunc(func(data ...[]byte) error {
-		return f(w, data...)
+	return WriteFramerFunc(func(s *Sniffer, data ...[]byte) error {
+		return f(w, s, data...)
 	})
 }
 
 // OutputWrapper writes a preface before whatever it's writing.
-func PrefaceWriter(preface string) WriteFramerTransformer {
-	bpreface := []byte(preface)
-	return func(w WriteFramer, data ...[]byte) error {
-		todo := [][]byte{bpreface}
-		return w.WriteFrame(append(todo, data...)...)
+func PrefaceWriter(preface func(s *Sniffer) []byte) WriteFramerTransformer {
+	return func(w WriteFramer, s *Sniffer, data ...[]byte) error {
+		todo := [][]byte{preface(s)}
+		return w.WriteFrame(s, append(todo, data...)...)
 	}
 }
 
-// htmlHeaderSuppresser writes only the first line of html headers.
-type HtmlHeaderSuppresser struct {
-	w        io.Writer
-	suppress bool
-}
-
-func (w *HtmlHeaderSuppresser) Write(data []byte) (int, error) {
-	if w.suppress {
-		// If the first line contains HTTP
-		splits := bytes.SplitN(data, []byte("\r\n"), 1)
-		if len(splits) > 1 && bytes.Contains(splits[0], []byte("HTTP/1.")) {
-			// Get rid of everything through the double line
-			headerBody := bytes.SplitN(splits[1], []byte("\r\n\r\n"), 1)
-			buf := bytes.NewBuffer(nil)
-			buf.Write(splits[0])
-			if len(headerBody) > 1 {
-				buf.Write(headerBody[1])
-			}
-			return w.w.Write(buf.Bytes())
+// SuppressHtmlHeaders writes only the first line of html headers.
+func SuppressHtmlHeaders(w WriteFramer, s *Sniffer, dataIn ...[]byte) error {
+	data := join(dataIn...)
+	// If the first line contains HTTP
+	data = bytes.TrimLeftFunc(data, unicode.IsSpace)
+	splits := bytes.SplitN(data, []byte("\r\n"), 2)
+	if len(splits) > 1 && bytes.Contains(splits[0], []byte("HTTP/1.")) {
+		// Get rid of everything through the double line
+		headerBody := bytes.SplitN(splits[1], []byte("\r\n\r\n"), 2)
+		first := splits[0]
+		var rest []byte
+		if len(headerBody) > 1 {
+			rest = headerBody[1]
 		}
+		return w.WriteFrame(s, first, []byte("\n"), rest)
 	}
-	return w.w.Write(data)
+	return w.WriteFrame(s, dataIn...)
 }
 
 // Sniff listens on the listener, dials the server when it gets a connection,
 // and sniffs the resulting traffic.
-func Sniff(listener net.Listener, serverAddr string, output io.Writer) {
+func Sniff(listener net.Listener, serverAddr string, output io.Writer) error {
+	fromClient, fromServer := DefaultWriteFramers(output)
+	return SniffToOutput(listener, serverAddr, fromClient, fromServer)
+}
+
+// Sniff listens on the listener, dials the server when it gets a connection,
+// and sniffs the resulting traffic.
+func SniffToOutput(listener net.Listener, serverAddr string, fromClient, fromServer WriteFramer) error {
 	var id int
 	for {
 		clientConn, err := listener.Accept()
 		if err != nil {
-			return
+			return err
 		}
 		serverConn, err := net.Dial("tcp", serverAddr)
 		if err != nil {
 			log.Printf("Error in Dial: %v\n", err)
-			return
+			return err
 		}
-		s := NewSnifferDefault(clientConn, serverConn, id, output)
+		s := NewSniffer(clientConn, serverConn, id, fromClient, fromServer)
 		id++
 		s.Run()
 	}
+	return nil
 }
