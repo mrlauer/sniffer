@@ -56,13 +56,12 @@ func main() {
 
 	// Yucky ui to toggle header suppression
 	go func() {
-		var s string
 		for {
+			var s string
 			_, err := fmt.Scanf("%s", &s)
 			if err == io.EOF {
 				return
-			}
-			if s == "h" {
+			} else if s == "h" {
 				*suppressHeaders = !*suppressHeaders
 			}
 		}

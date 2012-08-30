@@ -193,6 +193,7 @@ func TestHtmlSuppressHeaders(t *testing.T) {
 	snifferExpected := func() string {
 		return `>>>>>> 0
 GET / HTTP/1.1
+
 <<<<<< 0
 HTTP/1.1 200 OK
 5

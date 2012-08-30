@@ -143,7 +143,13 @@ func (f WriteFramerTransformer) Transform(w WriteFramer) WriteFramer {
 func PrefaceWriter(preface func(s *Sniffer) []byte) WriteFramerTransformer {
 	return func(w WriteFramer, s *Sniffer, data ...[]byte) error {
 		todo := [][]byte{preface(s)}
-		return w.WriteFrame(s, append(todo, data...)...)
+		todo = append(todo, data...)
+		nl := []byte{'\n'}
+		if len(data) > 0 && !bytes.HasSuffix(data[len(data)-1], nl) {
+			fmt.Printf("Appending newline to %q\n", data[len(data)-1])
+			todo = append(todo, nl)
+		}
+		return w.WriteFrame(s, todo...)
 	}
 }
 
