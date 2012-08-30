@@ -5,6 +5,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/mrlauer/sniffer/sniffer"
 	"io"
 	"io/ioutil"
@@ -21,6 +22,7 @@ func main() {
 	pport := flag.String("local", "", "Address to listen on")
 	pserver := flag.String("remote", "", "Remote server to dial")
 	ptestserver := flag.Bool("testserver", false, "Run as a simple http server, for testing purposes")
+	suppressHeaders := flag.Bool("h", false, "Suppress most HTML headers")
 
 	flag.Parse()
 	port := *pport
@@ -45,9 +47,33 @@ func main() {
 		log.Fatal(http.ListenAndServe(port, nil))
 	}
 
+	var suppr sniffer.WriteFramerTransformer = func(w sniffer.WriteFramer, s *sniffer.Sniffer, data ...[]byte) error {
+		if *suppressHeaders {
+			return sniffer.SuppressHtmlHeaders(w, s, data...)
+		}
+		return w.WriteFrame(s, data...)
+	}
+
+	// Yucky ui to toggle header suppression
+	go func() {
+		var s string
+		for {
+			_, err := fmt.Scanf("%s", &s)
+			if err == io.EOF {
+				return
+			}
+			if s == "h" {
+				*suppressHeaders = !*suppressHeaders
+			}
+		}
+	}()
+
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatalf("Error in listen for sniffer: %v", err)
 	}
-	sniffer.Sniff(l, server, os.Stdout)
+	fromClient, fromServer := sniffer.DefaultWriteFramers(os.Stdout)
+	fromClient = suppr.Transform(fromClient)
+	fromServer = suppr.Transform(fromServer)
+	sniffer.SniffToOutput(l, server, fromClient, fromServer)
 }
