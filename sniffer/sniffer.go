@@ -146,7 +146,6 @@ func PrefaceWriter(preface func(s *Sniffer) []byte) WriteFramerTransformer {
 		todo = append(todo, data...)
 		nl := []byte{'\n'}
 		if len(data) > 0 && !bytes.HasSuffix(data[len(data)-1], nl) {
-			fmt.Printf("Appending newline to %q\n", data[len(data)-1])
 			todo = append(todo, nl)
 		}
 		return w.WriteFrame(s, todo...)
