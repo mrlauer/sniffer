@@ -15,6 +15,7 @@ A simple example:
 package sniffer
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -27,8 +28,8 @@ import (
 type Sniffer struct {
 	client     net.Conn
 	server     net.Conn
-	fromClient io.Writer
-	fromServer io.Writer
+	fromClient WriteFramer
+	fromServer WriteFramer
 
 	closed bool
 	lock   sync.Mutex
@@ -40,13 +41,15 @@ type Sniffer struct {
 func (s *Sniffer) Run() {
 	bufSz := 4096
 	// client -> server
-	process := func(from io.ReadCloser, to io.WriteCloser, output *io.Writer) {
+	process := func(from io.ReadCloser, to io.WriteCloser, output *WriteFramer) {
 		buffer := make([]byte, bufSz)
 		for {
 			n, errR := from.Read(buffer)
 			var errW error
 			if n > 0 {
-				(*output).Write(buffer[:n])
+				s.lock.Lock()
+				(*output).WriteFrame(buffer[:n])
+				s.lock.Unlock()
 				_, errW = to.Write(buffer[:n])
 			}
 			// Distinguish between EOF and other errors?
@@ -82,23 +85,78 @@ func (s *Sniffer) setClosed(conn io.Closer) bool {
 
 // NewSniffer returns a new sniffer using the two connections.
 // It does not start the sniffer.
-func NewSniffer(client, server net.Conn, id int, rawOutput io.Writer) *Sniffer {
-	s := &Sniffer{client: client, server: server, Id: id}
-	s.fromClient = &outputWrapper{rawOutput, fmt.Sprintf(">>>>>> %d\n", id)}
-	s.fromServer = &outputWrapper{rawOutput, fmt.Sprintf("<<<<<< %d\n", id)}
+func NewSniffer(client, server net.Conn, id int, fromClient, fromServer WriteFramer) *Sniffer {
+	s := &Sniffer{client: client, server: server, Id: id, fromClient: fromClient, fromServer: fromServer}
 	return s
 }
 
-// outputWrapper writes a preface before whatever it's writing.
-type outputWrapper struct {
-	w       io.Writer
-	preface string
+func NewSnifferDefault(client, server net.Conn, id int, rawOutput io.Writer) *Sniffer {
+	fromClient := PrefaceWriter(fmt.Sprintf(">>>>>> %d\n", id)).Transform(RawOutputFramer{rawOutput})
+	fromServer := PrefaceWriter(fmt.Sprintf("<<<<<< %d\n", id)).Transform(RawOutputFramer{rawOutput})
+	return NewSniffer(client, server, id, fromClient, fromServer)
 }
 
-func (w *outputWrapper) Write(data []byte) (int, error) {
-	_, err := io.WriteString(w.w, w.preface)
-	if err != nil {
-		return 0, err
+type WriteFramer interface {
+	WriteFrame(data ...[]byte) error
+}
+
+type RawOutputFramer struct {
+	io.Writer
+}
+
+func (r RawOutputFramer) WriteFrame(data ...[]byte) error {
+	for _, d := range data {
+		_, err := io.Writer(r).Write(d)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type WriteFramerFunc func(data ...[]byte) error
+
+func (f WriteFramerFunc) WriteFrame(data ...[]byte) error {
+	return f(data...)
+}
+
+type WriteFramerTransformer func(w WriteFramer, data ...[]byte) error
+
+func (f WriteFramerTransformer) Transform(w WriteFramer) WriteFramer {
+	return WriteFramerFunc(func(data ...[]byte) error {
+		return f(w, data...)
+	})
+}
+
+// OutputWrapper writes a preface before whatever it's writing.
+func PrefaceWriter(preface string) WriteFramerTransformer {
+	bpreface := []byte(preface)
+	return func(w WriteFramer, data ...[]byte) error {
+		todo := [][]byte{bpreface}
+		return w.WriteFrame(append(todo, data...)...)
+	}
+}
+
+// htmlHeaderSuppresser writes only the first line of html headers.
+type HtmlHeaderSuppresser struct {
+	w        io.Writer
+	suppress bool
+}
+
+func (w *HtmlHeaderSuppresser) Write(data []byte) (int, error) {
+	if w.suppress {
+		// If the first line contains HTTP
+		splits := bytes.SplitN(data, []byte("\r\n"), 1)
+		if len(splits) > 1 && bytes.Contains(splits[0], []byte("HTTP/1.")) {
+			// Get rid of everything through the double line
+			headerBody := bytes.SplitN(splits[1], []byte("\r\n\r\n"), 1)
+			buf := bytes.NewBuffer(nil)
+			buf.Write(splits[0])
+			if len(headerBody) > 1 {
+				buf.Write(headerBody[1])
+			}
+			return w.w.Write(buf.Bytes())
+		}
 	}
 	return w.w.Write(data)
 }
@@ -117,7 +175,7 @@ func Sniff(listener net.Listener, serverAddr string, output io.Writer) {
 			log.Printf("Error in Dial: %v\n", err)
 			return
 		}
-		s := NewSniffer(clientConn, serverConn, id, output)
+		s := NewSnifferDefault(clientConn, serverConn, id, output)
 		id++
 		s.Run()
 	}

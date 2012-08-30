@@ -73,7 +73,7 @@ func TestSniffer(t *testing.T) {
 	<-serverDone
 	listener.Close()
 
-	expectedServer := `Foo!\nBar!\n`
+	expectedServer := "Foo!\nBar!\n"
 	expectedClient := "Received Foo!\n\nReceived Bar!\n\n"
 	expectedSniffer :=
 		`>>>>>> 0
@@ -88,7 +88,7 @@ Received Bar!
 
 `
 	if string(serverOutput.Bytes()) != expectedServer {
-		t.Errorf("Server received %s", serverOutput.Bytes())
+		t.Errorf("Server received %q", serverOutput.Bytes())
 	}
 	if string(clientOutput.Bytes()) != expectedClient {
 		t.Errorf("Client received %s", clientOutput.Bytes())
@@ -100,14 +100,20 @@ Received Bar!
 }
 
 func TestHtml(t *testing.T) {
+	http.DefaultServeMux = http.NewServeMux()
 	serverAddr := "127.0.0.1:1234"
 	snifferAddr := "127.0.0.1:5678"
+	kill := make(chan bool)
+	defer close(kill)
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-type", "text/plain;charset=UTF-8")
 		io.WriteString(w, "Ohai!")
 	})
 	go func() {
-		http.ListenAndServe(serverAddr, nil)
+		l, _ := net.Listen("tcp", serverAddr)
+		go http.Serve(l, nil)
+		<-kill
+		l.Close()
 	}()
 
 	snifferOutput := bytes.NewBuffer(nil)
@@ -116,16 +122,16 @@ func TestHtml(t *testing.T) {
 		if err != nil {
 			log.Fatalf("Error in listen for sniffer: %v", err)
 		}
-		Sniff(l, serverAddr, snifferOutput)
+		go Sniff(l, serverAddr, snifferOutput)
+		<-kill
+		l.Close()
 	}()
 
 	r, err := http.Get("http://" + snifferAddr)
 	if err != nil {
 		t.Fatalf("Could not get html: %v", err)
 	}
-	fmt.Printf("Reading body\n")
 	result, err := ioutil.ReadAll(r.Body)
-	fmt.Printf("Read body\n")
 	if string(result) != "Ohai!" || err != nil {
 		t.Errorf("Result body was %s, error %v", result, err)
 	}
@@ -151,4 +157,5 @@ Ohai!
 	if snifferGot != snifferExpected {
 		t.Errorf("Sniffer got %q\n", snifferGot)
 	}
+	time.Sleep(time.Millisecond * 10)
 }
