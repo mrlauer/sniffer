@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <title>Sniffing Proxy</title>
+        <script src="static/thirdparty/jquery-1.8.0.min.js"></script>
+        <script src="static/thirdparty/mustache.js"></script>
+        <script src="/static/websniffer.coffee.js"></script>
+        <link rel="stylesheet" type="text/css" href="/static/websniffer.css" />
+    </head>
+    <body>
+        <h1>Sniffing Proxy</h1>
+        <div class="controls">
+            <div><label for="local">Local Address</label><input type="text" id="local"></input></div>
+            <div><label for="remote">Remote Address</label><input type="text" id="remote"></input></div>
+            <div>
+                <input type="button" id="start" value="Start"></input>
+                <input type="button" id="stop" value="Stop"></input>
+                <span id="status" class="status"></span>
+            </div>
+        </div>
+        <div class="output" id="output">
+        </div>
+    </body>
+</html>
+

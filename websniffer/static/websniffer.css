@@ -1,0 +1,76 @@
+body {
+    font-family: "Palatino", "Georgia", serif;
+}
+
+h1 {
+    font-weight: normal;
+}
+
+.controls label {
+    margin-top:4px;
+    float: left;
+    width: 8em;
+}
+
+.controls input[type=text] {
+}
+
+.status.error {
+    color:red;
+}
+
+.output {
+    height: 40em;
+    overflow: auto;
+    border: thin black solid;
+    margin: 0.5em;
+    padding: 0em
+}
+
+.sniffed-block {
+    font-family: "DejaVu sans Mono", sans-serif;
+    font-size: 12px;
+    padding:0.5em;
+    border-bottom: thin gray solid;
+}
+
+.sniffed-block p {
+    margin:0;
+    padding:0;
+}
+
+.sniffed-block .desc {
+    float:right;
+}
+
+.sniffed-block .header {
+    font-weight: bold;
+}
+
+.sniffed-block.from-server {
+    font-style:italic;
+}
+
+.color0 {
+    background-color: #cff;
+}
+
+.color1 {
+    background-color: #ccf;
+}
+
+.color2 {
+    background-color: #fcf;
+}
+
+.color3 {
+    background-color: #fcc;
+}
+
+.color4 {
+    background-color: #ffc;
+}
+
+.color5 {
+    background-color: #cfc;
+}
