@@ -13,7 +13,8 @@ $ ()->
                 {{ id }}
             </div>
             <div class="header">
-            {{ #header }}<p>{{ . }}</p>{{ /header }}
+            {{ #headerFirst }}<p>{{ . }}</p>{{ /headerFirst }}
+            <div class="header-rest" style="display:none;">{{ #headerRest }}<p>{{ . }}</p>{{ /headerRest }}</div>
             </div>
             <div class="body">
             {{ #body }}<p>{{ . }}</p>{{ /body }}
@@ -26,6 +27,9 @@ $ ()->
     processData = (data)->
         if typeof data.header == 'string'
             data.header = data.header.split '\n'
+        if data.header
+            data.headerFirst = data.header.slice(0, 1)
+            data.headerRest = data.header.slice(1)
         if typeof data.body == 'string'
             data.body = data.body.split '\n'
         newBlock = $ Mustache.render sniffTempl, data
@@ -79,6 +83,9 @@ $ ()->
     $('#start').click start
     $('#stop').click stop
     $('#clear').click clearOutput
+
+    $('#output').on 'click', '.header', ()->
+        $('.header-rest', this).slideToggle()
 
 #     for i in [0..6]
 #         sampleData =

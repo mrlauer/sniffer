@@ -182,12 +182,18 @@ func Sniff(listener net.Listener, serverAddr string, output io.Writer) error {
 // and sniffs the resulting traffic.
 func SniffToOutput(listener net.Listener, serverAddr string, fromClient, fromServer WriteFramer) error {
 	var id int
+	done := make(chan bool)
+	defer close(done)
 	for {
 		clientConn, err := listener.Accept()
 		if err != nil {
 			return err
 		}
 		serverConn, err := net.Dial("tcp", serverAddr)
+		go func() {
+			<-done
+			serverConn.Close()
+		}()
 		if err != nil {
 			log.Printf("Error in Dial: %v\n", err)
 			return err
