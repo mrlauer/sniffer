@@ -47,9 +47,10 @@ $ ()->
         sniffing = true
         error = null
         addrs =
-            local: $('local').val()
-            remote: $('remote').val()
-        wsurl = "ws://#{document.location.host}/websocket/"
+            local: $('#local').val()
+            remote: $('#remote').val()
+        query = $.param addrs
+        wsurl = "ws://#{document.location.host}/websocket/?#{query}"
         websocket = if WebSocket? then WebSocket else MozWebSocket
         ws = new websocket wsurl
         ws.onopen = ()->
@@ -64,6 +65,8 @@ $ ()->
             if data.error
                 setStatus data.error, true
                 error = true
+            else if data.status
+                setStatus data.status
             else
                 processData data
 

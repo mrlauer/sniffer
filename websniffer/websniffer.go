@@ -5,15 +5,18 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"code.google.com/p/gorilla/mux"
 	"flag"
-	"os"
-	//	  "github.com/mrlauer/sniffer/sniffer"
+	"github.com/mrlauer/sniffer/sniffer"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path"
 	"runtime"
+	"strings"
 	"time"
+	"unicode"
 )
 
 var StaticDir string
@@ -73,27 +76,46 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath)
 }
 
+func sendMessage(ws *websocket.Conn, key, text string) {
+	websocket.JSON.Send(ws, map[string]interface{}{
+		key: text,
+	})
+}
+
 func wsockHandler(ws *websocket.Conn) {
-	data := map[string]interface{}{
-		"id":         1,
-		"fromClient": true,
-		"header":     "This is the header\nOhai!",
-		"body":       "This is the body\nbody body body",
+	// Start a sniffer.
+	req := ws.Request()
+	req.ParseForm()
+	local := req.Form.Get("local")
+	remote := req.Form.Get("remote")
+
+	if local != "" && remote != "" {
+		l, err := net.Listen("tcp", local)
+		if err != nil {
+			sendMessage(ws, "error", err.Error())
+			ws.Close()
+			return
+		}
+
+		go func() {
+			buf := make([]byte, 256)
+			for {
+				_, err := ws.Read(buf)
+				if err != nil {
+					l.Close()
+					return
+				}
+			}
+		}()
+
+		fn := func(m map[string]interface{}) error {
+			return websocket.JSON.Send(ws, m)
+		}
+		fromClient := webSniffer{fn, true}
+		fromServer := webSniffer{fn, false}
+		err = sniffer.SniffToOutput(l, remote, fromClient, fromServer)
+		ws.Close()
 	}
-	err := websocket.JSON.Send(ws, data)
-	if err != nil {
-		log.Println(err.Error())
-	}
-	time.Sleep(time.Second * 5)
-	data = map[string]interface{} {
-		"error": "Oh poo.",
-	}
-	err = websocket.JSON.Send(ws, data)
-	if err != nil {
-		log.Println(err.Error())
-	}
-	time.Sleep(time.Second * 5)
-	ws.Close()
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +124,31 @@ func index(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println(err)
 	}
+}
+
+// Channel sniffed stuff to a function
+type webSniffer struct {
+	fn         func(map[string]interface{}) error
+	FromClient bool
+}
+
+func (w webSniffer) WriteFrame(s *sniffer.Sniffer, dataIn ...[]byte) error {
+	data := string(bytes.Join(dataIn, nil))
+	data = strings.TrimLeftFunc(data, unicode.IsSpace)
+	splits := strings.SplitN(data, "\r\n", 2)
+	todo := map[string]interface{}{
+		"id":         s.Id,
+		"fromClient": w.FromClient,
+	}
+	if len(splits) > 1 && strings.Contains(splits[0], "HTTP/1.") {
+		headerBody := strings.SplitN(data, "\r\n\r\n", 2)
+		todo["header"] = (headerBody[0])
+		todo["body"] = headerBody[1]
+	} else {
+		todo["body"] = data
+	}
+
+	return w.fn(todo)
 }
 
 func main() {
