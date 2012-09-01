@@ -1,3 +1,15 @@
+/*
+websniffer runs a tcp proxy server with a web control panel.
+
+  websniffer -addr=":8080"
+
+runs an http server on port 8080. Navigate to that page, enter local and remote addresses, and hit Start.
+All the traffic will be dumped to the browser window. Output from different connections will be conveniently color-coded.
+If the traffic appears to be http, the headers will appear in boldface with all but the first line hidden. Click on the
+header to toggle display of the whole thing. Message bodies will not be decoded.
+
+websniffer requires a browser that supports websockets.
+*/
 package main
 
 import (
