@@ -5,6 +5,7 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"code.google.com/p/gorilla/mux"
 	"flag"
+	"fmt"
 	"github.com/mrlauer/sniffer/sniffer"
 	"html/template"
 	"log"
@@ -118,11 +119,28 @@ func wsockHandler(ws *websocket.Conn) {
 	}
 }
 
-func index(w http.ResponseWriter, r *http.Request) {
-	t := template.Must(template.ParseFiles(path.Join(TemplateDir, "websniffer.html")))
-	err := t.Execute(w, nil)
+func index(w http.ResponseWriter, r *http.Request, local, remote string) {
+	t, err := template.ParseFiles(path.Join(TemplateDir, "websniffer.html"))
 	if err != nil {
-		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	b := bytes.NewBuffer(nil)
+	err = t.Execute(b, map[string]string{
+		"local":  local,
+		"remote": remote,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-type", "text/html")
+	w.Write(b.Bytes())
+}
+
+func makeIndex(local, remote string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		index(w, r, local, remote)
 	}
 }
 
@@ -153,13 +171,17 @@ func (w webSniffer) WriteFrame(s *sniffer.Sniffer, dataIn ...[]byte) error {
 
 func main() {
 	addr := flag.String("addr", ":8080", "address of the sniffer web interface")
+	local := flag.String("local", "localhost:8081", "local address to proxy")
+	remote := flag.String("remote", "localhost:8082", "remote address to proxy")
+
 	flag.Parse()
 
 	r := mux.NewRouter()
-	r.HandleFunc("/", index)
+	r.HandleFunc("/", makeIndex(*local, *remote))
 	r.HandleFunc(`/static/{filename:.*\.coffee}.js`, coffeeHandler)
 	r.HandleFunc("/static/{filename:.*}", staticHandler)
 	r.Handle(`/websocket/`, websocket.Handler(wsockHandler)).Name("wsconn")
 	http.Handle("/", r)
+	fmt.Printf("Listening on %s\n", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }

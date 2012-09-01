@@ -78,6 +78,7 @@ $ ()->
 
     $('#start').click start
     $('#stop').click stop
+    $('#clear').click clearOutput
 
 #     for i in [0..6]
 #         sampleData =

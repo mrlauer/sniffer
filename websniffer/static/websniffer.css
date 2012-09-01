@@ -32,6 +32,8 @@ h1 {
     font-size: 12px;
     padding:0.5em;
     border-bottom: thin gray solid;
+    clear:both;
+    min-height:1.3em;
 }
 
 .sniffed-block p {
@@ -52,25 +54,25 @@ h1 {
 }
 
 .color0 {
-    background-color: #cff;
+    background-color: #dff;
 }
 
 .color1 {
-    background-color: #ccf;
+    background-color: #fdd;
 }
 
 .color2 {
-    background-color: #fcf;
+    background-color: #fdf;
 }
 
 .color3 {
-    background-color: #fcc;
+    background-color: #dfd;
 }
 
 .color4 {
-    background-color: #ffc;
+    background-color: #ffd;
 }
 
 .color5 {
-    background-color: #cfc;
+    background-color: #ddf;
 }
