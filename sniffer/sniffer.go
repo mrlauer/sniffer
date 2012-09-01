@@ -36,14 +36,16 @@ type Sniffer struct {
 	fromClient WriteFramer
 	fromServer WriteFramer
 
+	Done   chan bool
 	closed bool
 	lock   sync.Mutex
 
 	Id int
 }
 
-// Run sets up the read/write loops. It does not block.
+// Run sets up the read/write loops. It blocks.
 func (s *Sniffer) Run() {
+	defer close(s.Done)
 	bufSz := 4096
 	// client -> server
 	process := func(from io.ReadCloser, to io.WriteCloser, output WriteFramer) {
@@ -73,7 +75,7 @@ func (s *Sniffer) Run() {
 		}
 	}
 	go process(s.client, s.server, s.fromClient)
-	go process(s.server, s.client, s.fromServer)
+	process(s.server, s.client, s.fromServer)
 }
 
 // setClosed sets the close flag and returns the previous status.
@@ -92,6 +94,7 @@ func (s *Sniffer) setClosed(conn io.Closer) bool {
 // It does not start the sniffer.
 func NewSniffer(client, server net.Conn, id int, fromClient, fromServer WriteFramer) *Sniffer {
 	s := &Sniffer{client: client, server: server, Id: id, fromClient: fromClient, fromServer: fromServer}
+	s.Done = make(chan bool)
 	return s
 }
 
@@ -190,17 +193,20 @@ func SniffToOutput(listener net.Listener, serverAddr string, fromClient, fromSer
 			return err
 		}
 		serverConn, err := net.Dial("tcp", serverAddr)
-		go func() {
-			<-done
-			serverConn.Close()
-		}()
 		if err != nil {
 			log.Printf("Error in Dial: %v\n", err)
 			return err
 		}
 		s := NewSniffer(clientConn, serverConn, id, fromClient, fromServer)
 		id++
-		s.Run()
+		go s.Run()
+		go func() {
+			select {
+			case <-done:
+				serverConn.Close()
+			case <-s.Done:
+			}
+		}()
 	}
 	return nil
 }
